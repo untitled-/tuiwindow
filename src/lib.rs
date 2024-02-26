@@ -7,7 +7,11 @@ pub enum LayoutDirection {
     Row,
 }
 
-type RenderFn = dyn Fn(&RenderProps, Rect);
+pub trait Render {
+    fn render(&mut self, render_props: &RenderProps, area: Rect);
+}
+
+type RenderFn = dyn Render;
 
 pub enum Component {
     Layout(uuid::Uuid, LayoutDirection, Vec<Component>),
@@ -36,15 +40,15 @@ pub struct VRenderProps<'a> {
 }
 
 impl Component {
-    pub fn new<T: Fn(Rect) + 'static>(render_fn: T) -> Self {
+    pub fn new<T: Render + 'static>(render_fn: T) -> Self {
         Self::Render {
             id: Uuid::new_v4(),
             focusable: false,
-            render: Box::new(move |_, rect| render_fn(rect)),
+            render: Box::new(render_fn),
         }
     }
 
-    pub fn new_focusable<T: Fn(&RenderProps, Rect) + 'static>(render_fn: T) -> Self {
+    pub fn new_focusable<T: Render + 'static>(render_fn: T) -> Self {
         Self::Render {
             id: Uuid::new_v4(),
             focusable: true,
@@ -82,7 +86,12 @@ impl Component {
         }
     }
 
-    pub fn visit(&self, opts: &VRenderProps, component_buffer: &mut ComponentBuffer, area: Rect) {
+    pub fn visit(
+        &mut self,
+        opts: &VRenderProps,
+        component_buffer: &mut ComponentBuffer,
+        area: Rect,
+    ) {
         match self {
             Component::Layout(_, layout, children) => {
                 let layout = ratatui::layout::Layout::new(
@@ -94,13 +103,13 @@ impl Component {
                 )
                 .split(area);
 
-                for (a, c) in layout.iter().zip(children.iter()) {
+                for (a, c) in layout.iter().zip(children.iter_mut()) {
                     c.visit(opts, component_buffer, *a);
                 }
             }
             Component::Render { id, render, .. } => {
                 let is_focused = opts.focused_element.map(|fid| fid == id).unwrap_or(false);
-                render(
+                render.render(
                     &RenderProps {
                         is_focused,
                         event: if is_focused { opts.event.clone() } else { None },
@@ -133,18 +142,43 @@ impl ComponentBuffer {
 #[cfg(test)]
 mod tests {
 
-    use crate::{ComponentBuffer, InputEvent, VRenderProps};
+    use crate::{ComponentBuffer, InputEvent, Render, VRenderProps};
 
     use super::Component;
 
+    struct TestRender {
+        name: String,
+        text_content: String,
+    }
+
+    impl TestRender {
+        fn new<T: Into<String>>(s: T) -> Self {
+            Self {
+                name: s.into(),
+                text_content: String::new(),
+            }
+        }
+    }
+
+    impl Render for TestRender {
+        fn render(&mut self, render_props: &crate::RenderProps, _area: ratatui::prelude::Rect) {
+            if let Some(ev) = &render_props.event {
+                match ev {
+                    InputEvent::Key(k) => self.text_content.push(*k),
+                }
+            }
+            println!("{}:{}", self.name, self.text_content)
+        }
+    }
+
     #[test]
     fn it_works() {
-        let app = Component::row(vec![
-            Component::new(|rect| println!("c1 {:?}", rect)),
-            Component::new_focusable(|opts, rect| println!("c2: {:?} {:?}", opts, rect)),
+        let mut app = Component::row(vec![
+            Component::new(TestRender::new("c1")),
+            Component::new_focusable(TestRender::new("c2")),
             Component::column(vec![
-                Component::new_focusable(|opts, rect| println!("c3:  {:?} {:?}", opts, rect)),
-                Component::new_focusable(|opts, rect| println!("c4:  {:?} {:?}", opts, rect)),
+                Component::new_focusable(TestRender::new("c3")),
+                Component::new_focusable(TestRender::new("c4")),
             ]),
         ]);
 
