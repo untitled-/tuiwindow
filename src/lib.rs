@@ -34,8 +34,8 @@ pub struct RenderProps {
     pub event_buffer: Vec<InputEvent>,
 }
 
-pub struct VRenderProps<'a> {
-    focused_element: Option<&'a Uuid>,
+pub struct VRenderProps {
+    focused_element: Option<Uuid>,
     event: Option<InputEvent>,
 }
 
@@ -86,7 +86,7 @@ impl Component {
         }
     }
 
-    pub fn visit(
+    pub fn render(
         &mut self,
         opts: &VRenderProps,
         component_buffer: &mut ComponentBuffer,
@@ -104,11 +104,11 @@ impl Component {
                 .split(area);
 
                 for (a, c) in layout.iter().zip(children.iter_mut()) {
-                    c.visit(opts, component_buffer, *a);
+                    c.render(opts, component_buffer, *a);
                 }
             }
             Component::Render { id, render, .. } => {
-                let is_focused = opts.focused_element.map(|fid| fid == id).unwrap_or(false);
+                let is_focused = opts.focused_element.map(|fid| fid == *id).unwrap_or(false);
                 render.render(
                     &RenderProps {
                         is_focused,
@@ -139,10 +139,14 @@ impl ComponentBuffer {
     }
 }
 
+pub trait LoopManager<'a>: Iterator<Item = (Option<InputEvent>, Option<Uuid>)> {}
+
 #[cfg(test)]
 mod tests {
 
-    use crate::{ComponentBuffer, InputEvent, Render, VRenderProps};
+    use uuid::Uuid;
+
+    use crate::{ComponentBuffer, InputEvent, LoopManager, Render, VRenderProps};
 
     use super::Component;
 
@@ -167,9 +171,58 @@ mod tests {
                     InputEvent::Key(k) => self.text_content.push(*k),
                 }
             }
-            println!("{}:{}", self.name, self.text_content)
+            println!(
+                "{}:{} (focused?:{})",
+                self.name, self.text_content, render_props.is_focused
+            )
         }
     }
+
+    struct TestLoopManager {
+        focusable_elements: Vec<Option<Uuid>>,
+        current_element: usize,
+        current_event: usize,
+        events: Vec<Option<InputEvent>>,
+    }
+
+    impl TestLoopManager {
+        fn new(focusable_elements: Vec<Option<Uuid>>, events: Vec<Option<InputEvent>>) -> Self {
+            Self {
+                focusable_elements,
+                current_element: 0,
+                current_event: 0,
+                events,
+            }
+        }
+    }
+
+    impl Iterator for TestLoopManager {
+        type Item = (Option<InputEvent>, Option<Uuid>);
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let next = self
+                .focusable_elements
+                .get(self.current_element)
+                .cloned()
+                .flatten();
+            if self.current_element + 1 == self.focusable_elements.len() {
+                self.current_element = 0;
+            } else {
+                self.current_element += 1;
+            }
+
+            let next_event = self.events.get(self.current_event).cloned().flatten();
+            if self.current_event + 1 >= self.events.len() {
+                self.current_event = 0;
+            } else {
+                self.current_event += 1;
+            }
+
+            Some((next_event, next))
+        }
+    }
+
+    impl<'a> LoopManager<'a> for TestLoopManager {}
 
     #[test]
     fn it_works() {
@@ -182,81 +235,47 @@ mod tests {
             ]),
         ]);
 
+        let all_focusable_elements = app.flatten_ids();
+
+        let mut all_focusable_iter = all_focusable_elements.iter().cycle();
+        all_focusable_iter.next();
+
+        let f1 = all_focusable_iter.next().cloned();
+        let f2 = all_focusable_iter.next().cloned();
+
+        let mut test_loop_manager = TestLoopManager::new(
+            vec![f1, f1, f1, f2, f2, f2],
+            vec![
+                None,
+                Some(InputEvent::Key('a')),
+                Some(InputEvent::Key('b')),
+                Some(InputEvent::Key('c')),
+            ],
+        );
+
         let mut event_buffer = ComponentBuffer::default();
-        let focusable_elements = app.flatten_ids();
-        let mut focus_iterator = focusable_elements.iter().cycle();
 
-        focus_iterator.next();
+        for i in 0..5 {
+            let (event, focused_element) = test_loop_manager.next().unwrap();
 
-        let focused_element = focus_iterator.next();
-
-        println!("Loop 1\n\n");
-        event_buffer.add_event(*focused_element.unwrap(), &None);
-        app.visit(
-            &VRenderProps {
-                focused_element,
-                event: None,
-            },
-            &mut event_buffer,
-            ratatui::layout::Rect {
-                x: 0,
-                y: 0,
-                width: 100,
-                height: 100,
-            },
-        );
-
-        println!("Loop 2\n\n");
-        let event = Some(InputEvent::Key('k'));
-        event_buffer.add_event(*focused_element.unwrap(), &event);
-
-        app.visit(
-            &VRenderProps {
-                focused_element,
-                event,
-            },
-            &mut event_buffer,
-            ratatui::layout::Rect {
-                x: 0,
-                y: 0,
-                width: 100,
-                height: 100,
-            },
-        );
-
-        println!("Loop 3\n\n");
-
-        let event = Some(InputEvent::Key('k'));
-        event_buffer.add_event(*focused_element.unwrap(), &event);
-        app.visit(
-            &VRenderProps {
-                focused_element,
-                event,
-            },
-            &mut event_buffer,
-            ratatui::layout::Rect {
-                x: 0,
-                y: 0,
-                width: 100,
-                height: 100,
-            },
-        );
-        println!("Loop 4");
-        let focused_element = focus_iterator.next();
-        let event = Some(InputEvent::Key('k'));
-        event_buffer.add_event(*focused_element.unwrap(), &event);
-        app.visit(
-            &VRenderProps {
-                focused_element,
-                event,
-            },
-            &mut event_buffer,
-            ratatui::layout::Rect {
-                x: 0,
-                y: 0,
-                width: 100,
-                height: 100,
-            },
-        )
+            println!(
+                "\n\nLoop {}: ev:{:?}, focused:{:?}",
+                i, event, focused_element
+            );
+            event_buffer.add_event(focused_element.unwrap(), &event);
+            app.render(
+                &VRenderProps {
+                    focused_element,
+                    event,
+                },
+                &mut event_buffer,
+                ratatui::layout::Rect {
+                    x: 0,
+                    y: 0,
+                    width: 100,
+                    height: 100,
+                },
+            );
+        }
     }
 }
