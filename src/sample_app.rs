@@ -11,7 +11,7 @@ use ratatui::{
 #[macro_use]
 extern crate vtree;
 use vtree::{
-    api::{Page, PageCollection},
+    api::{Menu, Page, PageCollection},
     core::InputEvent,
     tui::TuiCrossterm,
     window::DefaultEventMapper,
@@ -40,8 +40,8 @@ impl FocusableRender for AnotherWidget {
         );
     }
 
-    fn render_footer(&mut self, _render_props: &RenderProps, buff: &mut Buffer, area: Rect) {
-        Paragraph::new("List!").render(area, buff);
+    fn get_menu(&self) -> Option<Menu> {
+        Some(Menu::from_entries(vec![('/', "Search")]))
     }
 }
 

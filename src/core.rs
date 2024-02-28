@@ -31,6 +31,10 @@ pub trait Render: AsAny {
     {
         RenderComponent::new(self)
     }
+
+    fn get_menu(&self) -> Option<Menu> {
+        None
+    }
 }
 
 pub trait FocusableRender: Render {
@@ -38,6 +42,10 @@ pub trait FocusableRender: Render {
 
     #[allow(unused_variables)]
     fn render_footer(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect) {}
+
+    fn get_menu(&self) -> Option<Menu> {
+        None
+    }
 }
 
 impl<T: FocusableRender> Render for T {
@@ -50,6 +58,10 @@ impl<T: FocusableRender> Render for T {
         Self: Sized + 'static,
     {
         RenderComponent::new_focusable(self)
+    }
+
+    fn get_menu(&self) -> Option<Menu> {
+        FocusableRender::get_menu(self)
     }
 }
 
@@ -146,13 +158,15 @@ pub trait RenderFlow {
     }
 }
 
+pub struct RenderComponentDetails {
+    pub id: uuid::Uuid,
+    pub focusable: bool,
+    pub render: Box<dyn Render>,
+}
+
 pub enum RenderComponent {
     Layout(uuid::Uuid, LayoutDirection, Vec<RenderComponent>),
-    Render {
-        id: uuid::Uuid,
-        focusable: bool,
-        render: Box<dyn Render>,
-    },
+    Render(RenderComponentDetails),
     Factory(Box<RenderFactoryBox>),
 }
 
@@ -178,19 +192,19 @@ pub struct VRenderProps {
 
 impl RenderComponent {
     pub fn new<T: Render + 'static>(render_fn: T) -> Self {
-        Self::Render {
+        Self::Render(RenderComponentDetails {
             id: Uuid::new_v4(),
             focusable: false,
             render: Box::new(render_fn),
-        }
+        })
     }
 
     pub fn new_focusable<T: Render + 'static>(render_fn: T) -> Self {
-        Self::Render {
+        Self::Render(RenderComponentDetails {
             id: Uuid::new_v4(),
             focusable: true,
             render: Box::new(render_fn),
-        }
+        })
     }
 
     pub fn new_factory<T: RenderFactory + 'static>(render_factory: T) -> Self {
@@ -203,7 +217,7 @@ impl RenderComponent {
     pub fn is_focusable(&self) -> bool {
         match self {
             RenderComponent::Layout(_, _, _) => false,
-            RenderComponent::Render { focusable, .. } => *focusable,
+            RenderComponent::Render(details) => details.focusable,
             RenderComponent::Factory(_) => false,
         }
     }
@@ -221,9 +235,9 @@ impl RenderComponent {
             RenderComponent::Layout(_, _, children) => {
                 children.iter().flat_map(|c| c.flatten_ids()).collect()
             }
-            RenderComponent::Render { id, focusable, .. } => {
-                if *focusable {
-                    vec![*id]
+            RenderComponent::Render(details) => {
+                if details.focusable {
+                    vec![details.id]
                 } else {
                     vec![]
                 }
@@ -232,18 +246,32 @@ impl RenderComponent {
         }
     }
 
-    pub fn visit<T: Render + Any>(&self, f: &mut dyn FnMut(Option<&T>)) {
+    pub fn visit_with_downcast<T: Render + Any>(&self, f: &mut dyn FnMut(Option<&T>)) {
         match self {
             RenderComponent::Layout(_, _, children) => {
                 for c in children {
-                    c.visit(f)
+                    c.visit_with_downcast(f)
                 }
             }
-            RenderComponent::Render { render, .. } => {
-                f(render.as_any().downcast_ref::<T>());
+            RenderComponent::Render(details) => {
+                f(details.render.as_any().downcast_ref::<T>());
             }
-            RenderComponent::Factory(factory) => factory.component().visit(f),
+            RenderComponent::Factory(factory) => factory.component().visit_with_downcast(f),
         };
+    }
+    pub fn visit(&self, f: &mut dyn FnMut(&RenderComponentDetails) -> bool) -> bool {
+        match self {
+            RenderComponent::Layout(_, _, children) => {
+                for c in children {
+                    if !c.visit(f) {
+                        return false;
+                    }
+                }
+                true
+            }
+            RenderComponent::Render(details) => f(details),
+            RenderComponent::Factory(factory) => factory.component().visit(f),
+        }
     }
 }
 
@@ -270,13 +298,16 @@ impl RenderFlow for RenderComponent {
                     c.render(opts, component_buffer, buff, *a);
                 }
             }
-            RenderComponent::Render { id, render, .. } => {
-                let is_focused = opts.focused_element.map(|fid| fid == *id).unwrap_or(false);
-                render.render(
+            RenderComponent::Render(details) => {
+                let is_focused = opts
+                    .focused_element
+                    .map(|fid| fid == details.id)
+                    .unwrap_or(false);
+                details.render.render(
                     &RenderProps {
                         is_focused,
                         event: if is_focused { opts.event.clone() } else { None },
-                        event_buffer: component_buffer.get_buffer(id),
+                        event_buffer: component_buffer.get_buffer(&details.id),
                     },
                     buff,
                     area,
@@ -296,9 +327,9 @@ impl RenderFlow for RenderComponent {
             RenderComponent::Layout(_, _, children) => {
                 children.iter().flat_map(|c| c.flatten_ids()).collect()
             }
-            RenderComponent::Render { id, focusable, .. } => {
-                if *focusable {
-                    vec![*id]
+            RenderComponent::Render(details) => {
+                if details.focusable {
+                    vec![details.id]
                 } else {
                     vec![]
                 }
@@ -341,6 +372,7 @@ mod tests {
 
     use crate::core::RenderFlow;
     use crate::macros::column_widget;
+    use crate::row_widget;
 
     use super::{
         ComponentBuffer, InputEvent, LoopManager, Render, RenderFactory, RenderProps, VRenderProps,
@@ -438,7 +470,7 @@ mod tests {
         ]);
 
         run_loop(&mut app);
-        app.visit::<TestRender>(&mut |x| {
+        app.visit_with_downcast::<TestRender>(&mut |x| {
             assert!(x.is_some());
 
             let node = x.unwrap();
@@ -469,7 +501,7 @@ mod tests {
         ]);
 
         run_loop(&mut app);
-        app.visit::<TestRender>(&mut |x| {
+        app.visit_with_downcast::<TestRender>(&mut |x| {
             assert!(x.is_some());
 
             let node = x.unwrap();
@@ -536,7 +568,7 @@ mod tests {
         );
 
         run_loop(&mut app);
-        app.visit::<TestRender>(&mut |x| {
+        app.visit_with_downcast::<TestRender>(&mut |x| {
             assert!(x.is_some());
 
             let node = x.unwrap();
@@ -545,5 +577,43 @@ mod tests {
                 assert_eq!(node.text_content, String::from("ab"));
             }
         });
+    }
+
+    #[test]
+    fn test_visit() {
+        let app = column_widget!(
+            TestRender::new("c1"),
+            TestRender::new("c2"),
+            row_widget!(TestRender::new("c3"), TestRender::new("c4"))
+        );
+
+        let mut visited = vec![];
+
+        app.visit(&mut |rc| {
+            visited.push(rc.id);
+            true
+        });
+
+        assert_eq!(visited.len(), 4);
+    }
+
+    #[test]
+    fn test_visit_with_factory() {
+        let app = column_widget!(
+            TestRender::new("c1"),
+            RenderComponent::new_focusable(TestRender::new("c2")),
+            RenderComponent::new_factory(TestFactory {}),
+        );
+
+        let mut visited = vec![];
+
+        app.visit(&mut |details| {
+            visited.push(details.id);
+            true
+        });
+
+        visited.sort();
+
+        assert_eq!(visited.len(), 4);
     }
 }

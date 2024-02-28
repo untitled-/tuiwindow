@@ -1,6 +1,8 @@
-use crate::core::{RenderComponent, RenderFlow};
+use uuid::Uuid;
 
-#[derive(Default, Clone)]
+use crate::core::{RenderComponent, RenderComponentDetails, RenderFlow};
+
+#[derive(Default, Clone, Debug)]
 pub struct Menu {
     pub(crate) menu_content: Vec<(char, String)>,
 }
@@ -22,6 +24,7 @@ impl Menu {
 }
 
 pub struct Page {
+    id: Uuid,
     title: String,
     pub(crate) shortcut: char,
     root: RenderComponent,
@@ -29,12 +32,17 @@ pub struct Page {
 }
 
 impl Page {
+    pub fn get_page_id(&self) -> &Uuid {
+        &self.id
+    }
+
     pub fn new<T: Into<RenderComponent>, S: Into<String>>(
         title: S,
         shortcut: char,
         root: T,
     ) -> Self {
         Self {
+            id: Uuid::new_v4(),
             shortcut,
             title: title.into(),
             root: root.into(),
@@ -50,6 +58,10 @@ impl Page {
     pub fn with_menu_entries<T: Into<String>>(&mut self, entries: Vec<(char, T)>) -> &mut Self {
         self.menu = Menu::from_entries(entries);
         self
+    }
+
+    pub fn visit(&self, f: &mut dyn FnMut(&RenderComponentDetails) -> bool) {
+        self.root.visit(f);
     }
 }
 
@@ -74,7 +86,7 @@ impl RenderFlow for Page {
 }
 
 pub struct PageCollection {
-    pages: Vec<Page>,
+    pub(crate) pages: Vec<Page>,
     prev_page: Option<usize>,
     current_page: usize,
 }

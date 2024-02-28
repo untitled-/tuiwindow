@@ -10,13 +10,70 @@ use ratatui::{
 use uuid::Uuid;
 
 use crate::{
-    api::{Menu, PageCollection},
+    api::{Menu, Page, PageCollection},
     core::{ComponentBuffer, InputEvent, RenderFlow, VRenderProps},
+    utils::{CyclicList, SelectableHashMap},
 };
 
 struct WindowRenderer {}
 
-// TODO: Too ugly, lets improve this
+struct PageContext {
+    id: Uuid,
+    page_id: Uuid,
+    focusable_elements: CyclicList<Uuid>,
+    event_buffer: ComponentBuffer,
+}
+
+impl PageContext {
+    fn new(page: &Page) -> Self {
+        let root_id = Uuid::new_v4();
+        Self {
+            id: root_id,
+            page_id: *page.get_page_id(),
+            focusable_elements: Self::build_focusable_elements(&root_id, page),
+            event_buffer: ComponentBuffer::default(),
+        }
+    }
+
+    fn build_focusable_elements(window_id: &Uuid, page: &Page) -> CyclicList<Uuid> {
+        let mut focusable_elements = vec![*window_id];
+        focusable_elements.append(&mut page.get_focusable_elements());
+        CyclicList::new(focusable_elements)
+    }
+
+    pub(crate) fn reconcile(&mut self, page: &Page) {
+        if self.page_id != *page.get_page_id() {
+            self.focusable_elements = Self::build_focusable_elements(&self.id, page);
+            self.event_buffer = ComponentBuffer::default();
+            self.page_id = *page.get_page_id();
+        }
+    }
+
+    pub(crate) fn is_window_focused(&self) -> bool {
+        self.focusable_elements
+            .current()
+            .map(|fid| fid == &self.id)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn focus_next(&mut self) {
+        self.focusable_elements.move_next();
+    }
+
+    pub(crate) fn focus_prev(&mut self) {
+        self.focusable_elements.move_previous();
+    }
+
+    pub(crate) fn get_focused_element(&self) -> Option<Uuid> {
+        self.focusable_elements.current().cloned()
+    }
+
+    pub(crate) fn reset_focus(&mut self) {
+        self.focusable_elements.reset()
+    }
+}
+
+// TODO: Too ugly, lets improve this. Make it extensible
 impl WindowRenderer {
     pub(crate) fn pre_render(
         window: &mut Window,
@@ -28,7 +85,7 @@ impl WindowRenderer {
     ) -> Rect {
         let layout = Layout::new(
             Direction::Vertical,
-            vec![Constraint::Fill(1), Constraint::Length(2)],
+            vec![Constraint::Fill(1), Constraint::Length(1)],
         )
         .split(area);
 
@@ -60,6 +117,9 @@ impl WindowRenderer {
         if window.is_window_focused() {
             let mut extra = WindowRenderer::format_menu(maybe_menu, current_page);
             items.append(&mut extra);
+        } else {
+            let mut extra = WindowRenderer::format_menu(maybe_focused_menu, current_page);
+            items.append(&mut extra);
         }
         let footer_layout = Layout::new(
             Direction::Horizontal,
@@ -87,11 +147,9 @@ impl WindowRenderer {
 
 pub struct Window {
     id: Uuid,
-    focusable_elements: Vec<Uuid>,
-    event_buffer: ComponentBuffer,
     end_condition: Box<dyn Fn(&InputEvent) -> bool>,
     is_ended: bool,
-    currently_focused: usize,
+    page_context_map: SelectableHashMap<Uuid, PageContext>,
 }
 
 enum WindowEventResult {
@@ -105,42 +163,37 @@ impl Window {
         end_condition: F,
     ) -> Self {
         let window_id = Uuid::new_v4();
-        let event_buffer = ComponentBuffer::default();
-        let mut focusable_elements = vec![window_id];
-        focusable_elements.append(&mut app.get_focusable_elements());
 
         Self {
             id: window_id,
-            focusable_elements,
-            event_buffer,
+            // focusable_elements,
+            // event_buffer,
             end_condition: Box::new(end_condition),
             is_ended: false,
-            currently_focused: 0,
+            // currently_focused: 0,
+            page_context_map: SelectableHashMap::new(
+                *app.get_current_page().get_page_id(),
+                app.pages
+                    .iter()
+                    .map(|page| (*page.get_page_id(), PageContext::new(page)))
+                    .collect(),
+            ),
         }
     }
 
     fn is_window_focused(&self) -> bool {
-        self.focusable_elements
-            .get(self.currently_focused)
-            .map(|fid| fid == &self.id)
+        self.page_context_map
+            .get_current()
+            .map(|p| p.is_window_focused())
             .unwrap_or(false)
     }
 
-    fn focus_next(&mut self) {
-        if self.currently_focused + 1 >= self.focusable_elements.len() {
-            self.currently_focused = 0;
-        } else {
-            self.currently_focused += 1;
-        }
-    }
-
     fn on_page_change(&mut self, page: &PageCollection) {
-        let event_buffer = ComponentBuffer::default();
-        let mut focusable_elements = vec![self.id];
-        focusable_elements.append(&mut page.get_focusable_elements());
-        self.focusable_elements = focusable_elements;
-        self.event_buffer = event_buffer;
-        self.currently_focused = 0;
+        let new_page = page.get_current_page();
+        if let Some(new_context) = self.page_context_map.get_mut(new_page.get_page_id()) {
+            new_context.reconcile(new_page)
+        }
+        self.page_context_map.set_current(*new_page.get_page_id())
     }
 
     fn handle_window_event(
@@ -157,12 +210,44 @@ impl Window {
                     return WindowEventResult::PageChange;
                 }
             }
-            InputEvent::FocusNext => self.focus_next(),
-            InputEvent::FocusWindow => self.currently_focused = 0,
-            InputEvent::FocusPrevious => todo!(),
+            InputEvent::FocusNext => {
+                if let Some(p) = self.page_context_map.get_current_mut() {
+                    p.focus_next()
+                }
+            }
+            InputEvent::FocusWindow => {
+                if let Some(p) = self.page_context_map.get_current_mut() {
+                    p.reset_focus()
+                }
+            }
+            InputEvent::FocusPrevious => {
+                if let Some(p) = self.page_context_map.get_current_mut() {
+                    p.focus_prev()
+                }
+            }
         };
 
         WindowEventResult::None
+    }
+
+    fn get_active_element_menu(
+        focused_element: &Option<Uuid>,
+        current_page: &Page,
+    ) -> Option<Menu> {
+        if let Some(fe) = focused_element {
+            let mut found = None;
+            current_page.visit(&mut |details| {
+                if details.id == *fe {
+                    found = details.render.get_menu();
+                    false
+                } else {
+                    true
+                }
+            });
+            found
+        } else {
+            None
+        }
     }
 
     pub fn render<T: EventMapper>(
@@ -179,24 +264,38 @@ impl Window {
                 WindowEventResult::None => {}
             };
         }
-        let focused_element = self.focusable_elements.get(self.currently_focused).cloned();
-        self.event_buffer
-            .add_event(focused_element.unwrap_or(self.id), &event);
+
+        let focused_element = if let Some(page) = self.page_context_map.get_current_mut() {
+            let focused_element = page.get_focused_element();
+            page.event_buffer
+                .add_event(focused_element.unwrap_or(self.id), &event);
+
+            focused_element
+        } else {
+            None
+        };
 
         let area = WindowRenderer::pre_render(
             self,
             app.get_current_page().shortcut,
             &app.get_menu(),
-            &None, //TODO: extract menu from focused element
+            &Self::get_active_element_menu(&focused_element, app.get_current_page()), //TODO: extract menu from focused element
             buff,
             area,
         );
+
+        // TODO: Deal with option
+        let event_buffer = self
+            .page_context_map
+            .get_current_mut()
+            .map(|p| &mut p.event_buffer)
+            .unwrap();
         app.render(
             &VRenderProps {
                 focused_element,
                 event,
             },
-            &mut self.event_buffer,
+            event_buffer,
             buff,
             area,
         )

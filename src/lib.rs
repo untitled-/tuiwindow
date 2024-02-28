@@ -3,6 +3,7 @@ pub mod core;
 pub mod macros;
 pub mod api;
 pub mod tui;
+pub(crate) mod utils;
 pub mod window;
 
 #[cfg(test)]
@@ -68,7 +69,7 @@ mod tests {
             // draw
             window.render::<DefaultEventMapper>(&mut app, buff, area)
         })?;
-        thread::sleep(Duration::from_secs(2));
+        thread::sleep(Duration::from_secs(1));
 
         // TuiCrossterm::tear_down(terminal)
         Ok(())
