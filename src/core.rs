@@ -11,6 +11,8 @@ use ratatui::{
 };
 use uuid::Uuid;
 
+use crate::api::Menu;
+
 #[derive(PartialEq, Eq)]
 pub enum LayoutDirection {
     Column,
@@ -23,11 +25,11 @@ pub trait AsAny {
 
 pub trait Render: AsAny {
     fn render(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect);
-    fn into_component(self) -> Component
+    fn into_component(self) -> RenderComponent
     where
         Self: Sized + 'static,
     {
-        Component::new(self)
+        RenderComponent::new(self)
     }
 }
 
@@ -43,11 +45,11 @@ impl<T: FocusableRender> Render for T {
         FocusableRender::render(self, render_props, buff, area)
     }
 
-    fn into_component(self) -> Component
+    fn into_component(self) -> RenderComponent
     where
         Self: Sized + 'static,
     {
-        Component::new_focusable(self)
+        RenderComponent::new_focusable(self)
     }
 }
 
@@ -57,29 +59,29 @@ impl<T: Render + 'static> AsAny for T {
     }
 }
 
-impl<T: Render + 'static> From<T> for Component {
+impl<T: Render + 'static> From<T> for RenderComponent {
     fn from(value: T) -> Self {
         value.into_component()
     }
 }
 
 pub trait RenderFactory {
-    fn render(&mut self) -> Component;
+    fn render(&mut self) -> RenderComponent;
 }
 
 /// Wrapper for factory of components.
 /// We use interior mutability to cache the results of the render factory.
 pub struct RenderFactoryBox {
-    cached: RefCell<Option<Component>>,
+    cached: RefCell<Option<RenderComponent>>,
     render: RefCell<Box<dyn RenderFactory>>,
 }
 
 struct RW<'a> {
-    inner: RefMut<'a, Component>,
+    inner: RefMut<'a, RenderComponent>,
 }
 
 impl<'b> Deref for RW<'b> {
-    type Target = Component;
+    type Target = RenderComponent;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -87,11 +89,11 @@ impl<'b> Deref for RW<'b> {
 }
 
 struct RWMut<'a> {
-    inner: RefMut<'a, Component>,
+    inner: RefMut<'a, RenderComponent>,
 }
 
 impl<'b> Deref for RWMut<'b> {
-    type Target = Component;
+    type Target = RenderComponent;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -105,11 +107,11 @@ impl<'b> DerefMut for RWMut<'b> {
 }
 
 impl RenderFactoryBox {
-    fn build_component(&self) -> Component {
+    fn build_component(&self) -> RenderComponent {
         self.render.borrow_mut().render()
     }
 
-    fn cache(&self) -> RefMut<'_, Component> {
+    fn cache(&self) -> RefMut<'_, RenderComponent> {
         RefMut::map(self.cached.borrow_mut(), |c| {
             c.get_or_insert_with(|| self.build_component())
         })
@@ -128,8 +130,24 @@ impl RenderFactoryBox {
     }
 }
 
-pub enum Component {
-    Layout(uuid::Uuid, LayoutDirection, Vec<Component>),
+pub trait RenderFlow {
+    fn render(
+        &mut self,
+        opts: &VRenderProps,
+        component_buffer: &mut ComponentBuffer,
+        buff: &mut Buffer,
+        area: Rect,
+    );
+
+    fn get_focusable_elements(&self) -> Vec<Uuid>;
+
+    fn get_menu(&self) -> Option<Menu> {
+        None
+    }
+}
+
+pub enum RenderComponent {
+    Layout(uuid::Uuid, LayoutDirection, Vec<RenderComponent>),
     Render {
         id: uuid::Uuid,
         focusable: bool,
@@ -158,7 +176,7 @@ pub struct VRenderProps {
     pub event: Option<InputEvent>,
 }
 
-impl Component {
+impl RenderComponent {
     pub fn new<T: Render + 'static>(render_fn: T) -> Self {
         Self::Render {
             id: Uuid::new_v4(),
@@ -184,51 +202,53 @@ impl Component {
 
     pub fn is_focusable(&self) -> bool {
         match self {
-            Component::Layout(_, _, _) => false,
-            Component::Render { focusable, .. } => *focusable,
-            Component::Factory(_) => false,
+            RenderComponent::Layout(_, _, _) => false,
+            RenderComponent::Render { focusable, .. } => *focusable,
+            RenderComponent::Factory(_) => false,
         }
     }
 
-    pub fn column(children: Vec<Component>) -> Self {
-        Component::Layout(uuid::Uuid::new_v4(), LayoutDirection::Column, children)
+    pub fn column(children: Vec<RenderComponent>) -> Self {
+        RenderComponent::Layout(uuid::Uuid::new_v4(), LayoutDirection::Column, children)
     }
 
-    pub fn row(children: Vec<Component>) -> Self {
-        Component::Layout(uuid::Uuid::new_v4(), LayoutDirection::Row, children)
+    pub fn row(children: Vec<RenderComponent>) -> Self {
+        RenderComponent::Layout(uuid::Uuid::new_v4(), LayoutDirection::Row, children)
     }
 
     pub fn flatten_ids(&self) -> Vec<Uuid> {
         match self {
-            Component::Layout(_, _, children) => {
+            RenderComponent::Layout(_, _, children) => {
                 children.iter().flat_map(|c| c.flatten_ids()).collect()
             }
-            Component::Render { id, focusable, .. } => {
+            RenderComponent::Render { id, focusable, .. } => {
                 if *focusable {
                     vec![*id]
                 } else {
                     vec![]
                 }
             }
-            Component::Factory(factory) => factory.component().flatten_ids(),
+            RenderComponent::Factory(factory) => factory.component().flatten_ids(),
         }
     }
 
     pub fn visit<T: Render + Any>(&self, f: &mut dyn FnMut(Option<&T>)) {
         match self {
-            Component::Layout(_, _, children) => {
+            RenderComponent::Layout(_, _, children) => {
                 for c in children {
                     c.visit(f)
                 }
             }
-            Component::Render { render, .. } => {
+            RenderComponent::Render { render, .. } => {
                 f(render.as_any().downcast_ref::<T>());
             }
-            Component::Factory(factory) => factory.component().visit(f),
+            RenderComponent::Factory(factory) => factory.component().visit(f),
         };
     }
+}
 
-    pub fn render(
+impl RenderFlow for RenderComponent {
+    fn render(
         &mut self,
         opts: &VRenderProps,
         component_buffer: &mut ComponentBuffer,
@@ -236,7 +256,7 @@ impl Component {
         area: Rect,
     ) {
         match self {
-            Component::Layout(_, layout, children) => {
+            RenderComponent::Layout(_, layout, children) => {
                 let layout = ratatui::layout::Layout::new(
                     match layout {
                         LayoutDirection::Column => Direction::Vertical,
@@ -250,7 +270,7 @@ impl Component {
                     c.render(opts, component_buffer, buff, *a);
                 }
             }
-            Component::Render { id, render, .. } => {
+            RenderComponent::Render { id, render, .. } => {
                 let is_focused = opts.focused_element.map(|fid| fid == *id).unwrap_or(false);
                 render.render(
                     &RenderProps {
@@ -263,11 +283,27 @@ impl Component {
                 )
             }
             // Component::Factory(factory) => factory.render(opts, component_buffer, area),
-            Component::Factory(factory) => {
+            RenderComponent::Factory(factory) => {
                 factory
                     .component_mut()
                     .render(opts, component_buffer, buff, area)
             }
+        }
+    }
+
+    fn get_focusable_elements(&self) -> Vec<Uuid> {
+        match self {
+            RenderComponent::Layout(_, _, children) => {
+                children.iter().flat_map(|c| c.flatten_ids()).collect()
+            }
+            RenderComponent::Render { id, focusable, .. } => {
+                if *focusable {
+                    vec![*id]
+                } else {
+                    vec![]
+                }
+            }
+            RenderComponent::Factory(factory) => factory.component().flatten_ids(),
         }
     }
 }
@@ -303,13 +339,14 @@ mod tests {
     use ratatui::buffer::Buffer;
     use uuid::Uuid;
 
+    use crate::core::RenderFlow;
     use crate::macros::column_widget;
 
     use super::{
         ComponentBuffer, InputEvent, LoopManager, Render, RenderFactory, RenderProps, VRenderProps,
     };
 
-    use super::Component;
+    use super::RenderComponent;
 
     #[derive(Debug)]
     struct TestRender {
@@ -391,12 +428,12 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let mut app = Component::row(vec![
+        let mut app = RenderComponent::row(vec![
             TestRender::new("c1").into(),
-            Component::new_focusable(TestRender::new("c2")),
-            Component::column(vec![
-                Component::new_focusable(TestRender::new("c3")),
-                Component::new_focusable(TestRender::new("c4")),
+            RenderComponent::new_focusable(TestRender::new("c2")),
+            RenderComponent::column(vec![
+                RenderComponent::new_focusable(TestRender::new("c3")),
+                RenderComponent::new_focusable(TestRender::new("c4")),
             ]),
         ]);
 
@@ -415,20 +452,20 @@ mod tests {
     struct TestFactory {}
 
     impl RenderFactory for TestFactory {
-        fn render(&mut self) -> Component {
-            Component::column(vec![
-                Component::new_focusable(TestRender::new("c3")),
-                Component::new_focusable(TestRender::new("c4")),
+        fn render(&mut self) -> RenderComponent {
+            RenderComponent::column(vec![
+                RenderComponent::new_focusable(TestRender::new("c3")),
+                RenderComponent::new_focusable(TestRender::new("c4")),
             ])
         }
     }
 
     #[test]
     fn it_works_with_factory() {
-        let mut app = Component::row(vec![
+        let mut app = RenderComponent::row(vec![
             TestRender::new("c1").into(),
-            Component::new_focusable(TestRender::new("c2")),
-            Component::new_factory(TestFactory {}),
+            RenderComponent::new_focusable(TestRender::new("c2")),
+            RenderComponent::new_factory(TestFactory {}),
         ]);
 
         run_loop(&mut app);
@@ -443,7 +480,7 @@ mod tests {
         });
     }
 
-    fn run_loop(app: &mut Component) {
+    fn run_loop(app: &mut RenderComponent) {
         let all_focusable_elements = app.flatten_ids();
 
         let mut all_focusable_iter = all_focusable_elements.iter().cycle();
@@ -494,8 +531,8 @@ mod tests {
     fn test_macros() {
         let mut app = column_widget!(
             TestRender::new("c1"),
-            Component::new_focusable(TestRender::new("c2")),
-            Component::new_factory(TestFactory {}),
+            RenderComponent::new_focusable(TestRender::new("c2")),
+            RenderComponent::new_factory(TestFactory {}),
         );
 
         run_loop(&mut app);

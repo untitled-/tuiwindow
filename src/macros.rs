@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! column_widget {
     ($($obj:expr),*$(,)?) => {
-        Component::column(vec![
+        RenderComponent::column(vec![
         $(
            $obj.into(),
         )*
@@ -13,7 +13,7 @@ macro_rules! column_widget {
 #[macro_export]
 macro_rules! row_widget {
     ($($obj:expr),*$(,)?) => {
-        Component::row(vec![
+        RenderComponent::row(vec![
         $(
            $obj.into(),
         )*

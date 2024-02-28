@@ -1,6 +1,7 @@
 pub mod core;
 #[macro_use]
 pub mod macros;
+pub mod api;
 pub mod tui;
 pub mod window;
 
@@ -17,11 +18,12 @@ mod tests {
         widgets::{Block, Borders, Paragraph, Widget},
     };
 
-    use crate::tui::TuiCrossterm;
     use crate::{
-        core::{Component, FocusableRender, Render, RenderProps},
+        api::{Page, PageCollection},
+        core::{FocusableRender, Render, RenderComponent, RenderProps},
         window::Window,
     };
+    use crate::{tui::TuiCrossterm, window::DefaultEventMapper};
 
     struct TestWidget {}
 
@@ -50,7 +52,11 @@ mod tests {
         let mut tui = TuiCrossterm::new()?;
         let terminal = tui.setup()?;
         // our stuff:
-        let mut app: Component = row_widget!(TestWidget {}, StaticWidget {});
+        let mut app = PageCollection::new(vec![Page::new(
+            "Page",
+            'p',
+            row_widget!(TestWidget {}, StaticWidget {}),
+        )]);
         let mut window = Window::new(&app, |ev| match ev {
             crate::core::InputEvent::Key(c) => *c == 'q',
             _ => false,
@@ -60,7 +66,7 @@ mod tests {
             let buff = f.buffer_mut();
 
             // draw
-            window.render(&mut app, buff, area)
+            window.render::<DefaultEventMapper>(&mut app, buff, area)
         })?;
         thread::sleep(Duration::from_secs(2));
 

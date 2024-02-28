@@ -10,9 +10,14 @@ use ratatui::{
 };
 #[macro_use]
 extern crate vtree;
-use vtree::{core::InputEvent, tui::TuiCrossterm};
 use vtree::{
-    core::{Component, FocusableRender, Render, RenderProps},
+    api::{Page, PageCollection},
+    core::InputEvent,
+    tui::TuiCrossterm,
+    window::DefaultEventMapper,
+};
+use vtree::{
+    core::{FocusableRender, Render, RenderComponent, RenderProps},
     window::Window,
 };
 
@@ -20,8 +25,19 @@ use vtree::{
 struct AnotherWidget {}
 
 impl FocusableRender for AnotherWidget {
-    fn render(&mut self, _render_props: &RenderProps, buff: &mut Buffer, area: Rect) {
-        Widget::render(List::new(vec!["Element 1", "Element 2"]), area, buff);
+    fn render(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect) {
+        let block = Block::new()
+            .borders(Borders::all())
+            .style(if render_props.is_focused {
+                Style::new().fg(Color::Red)
+            } else {
+                Style::new()
+            });
+        Widget::render(
+            List::new(vec!["Element 1", "Element 2"]).block(block),
+            area,
+            buff,
+        );
     }
 
     fn render_footer(&mut self, _render_props: &RenderProps, buff: &mut Buffer, area: Rect) {
@@ -73,10 +89,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut tui = TuiCrossterm::new()?;
     let terminal = tui.setup()?;
     // our stuff:
-    let mut app: Component = row_widget!(
-        AnotherWidget::default(),
-        column_widget!(StaticWidget {}, TestWidget::default())
-    );
+
+    let mut app = PageCollection::new(vec![
+        Page::new(
+            "Page 1",
+            '1',
+            row_widget!(
+                AnotherWidget::default(),
+                column_widget!(StaticWidget {}, TestWidget::default())
+            ),
+        ),
+        Page::new(
+            "Page 2",
+            '2',
+            column_widget!(
+                AnotherWidget::default(),
+                column_widget!(StaticWidget {}, TestWidget::default())
+            ),
+        ),
+    ]);
+
     let mut window = Window::new(&app, |ev| match ev {
         vtree::core::InputEvent::Key(c) => *c == 'q',
         _ => false,
@@ -88,7 +120,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let buff = f.buffer_mut();
 
             // draw
-            window.render(&mut app, buff, area)
+            window.render::<DefaultEventMapper>(&mut app, buff, area)
         })?;
     }
 
