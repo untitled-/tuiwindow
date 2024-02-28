@@ -9,24 +9,15 @@ mod tests {
 
     use std::thread;
     use std::time::Duration;
-    use std::{error::Error, io::Stdout};
+    use std::{error::Error};
 
-    use crossterm::{
-        event::{DisableMouseCapture, EnableMouseCapture},
-        execute,
-        terminal::{
-            disable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
-        },
-        QueueableCommand,
-    };
+    
     use ratatui::{
-        backend::CrosstermBackend,
         buffer::Buffer,
         layout::Rect,
         widgets::{Block, Borders, Paragraph, Widget},
-        Terminal,
     };
-    use uuid::Uuid;
+    
 
     use crate::tui::TuiCrossterm;
     use crate::{
