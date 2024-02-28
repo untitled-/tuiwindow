@@ -7,6 +7,10 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "example"
+path = "src/sample_app.rs"
+
 [dependencies]
 crossterm = "0.27.0"
 ratatui = "0.26.1"

@@ -33,6 +33,9 @@ pub trait Render: AsAny {
 
 pub trait FocusableRender: Render {
     fn render(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect);
+
+    #[allow(unused_variables)]
+    fn render_footer(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect) {}
 }
 
 impl<T: FocusableRender> Render for T {
@@ -138,6 +141,9 @@ pub enum Component {
 #[derive(Clone, Debug)]
 pub enum InputEvent {
     Key(char),
+    FocusWindow,
+    FocusNext,
+    FocusPrevious,
 }
 
 #[derive(Debug)]
@@ -327,10 +333,8 @@ mod tests {
             _buff: &mut Buffer,
             _area: ratatui::prelude::Rect,
         ) {
-            if let Some(ev) = &render_props.event {
-                match ev {
-                    InputEvent::Key(k) => self.text_content.push(*k),
-                }
+            if let Some(InputEvent::Key(k)) = &render_props.event {
+                self.text_content.push(*k)
             }
             println!(
                 "{}:{} (focused?:{})",

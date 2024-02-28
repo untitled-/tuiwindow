@@ -7,17 +7,15 @@ pub mod window;
 #[cfg(test)]
 mod tests {
 
+    use std::error::Error;
     use std::thread;
     use std::time::Duration;
-    use std::{error::Error};
 
-    
     use ratatui::{
         buffer::Buffer,
         layout::Rect,
         widgets::{Block, Borders, Paragraph, Widget},
     };
-    
 
     use crate::tui::TuiCrossterm;
     use crate::{
@@ -53,7 +51,10 @@ mod tests {
         let terminal = tui.setup()?;
         // our stuff:
         let mut app: Component = row_widget!(TestWidget {}, StaticWidget {});
-        let mut window = Window::new(&app);
+        let mut window = Window::new(&app, |ev| match ev {
+            crate::core::InputEvent::Key(c) => *c == 'q',
+            _ => false,
+        });
         terminal.draw(|f| {
             let area = f.size();
             let buff = f.buffer_mut();

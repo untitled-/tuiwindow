@@ -3,7 +3,7 @@ use std::{error::Error, io::Stdout};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
@@ -32,9 +32,9 @@ impl TuiCrossterm {
         TuiCrossterm::initialize_panic_handler();
         let mut stdout = std::io::stdout();
 
-        // stdout.queue(Clear(ClearType::All))?;
-
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        enable_raw_mode()?;
+        self.terminal.clear()?;
         Ok(&mut self.terminal)
     }
 
