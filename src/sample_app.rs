@@ -106,6 +106,7 @@ impl FocusableRender for TestWidget {
     }
 }
 
+#[derive(Default)]
 struct StaticWidget {}
 
 impl Render for StaticWidget {
@@ -117,11 +118,10 @@ impl Render for StaticWidget {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    thread::sleep(Duration::from_millis(500));
-
     let mut tui = TuiCrossterm::new()?;
     let terminal = tui.setup()?;
-    // our stuff:
+
+    // define the collection of pages:
 
     let mut app = PageCollection::new(vec![
         Page::new(
@@ -161,6 +161,5 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
     }
 
-    // TuiCrossterm::tear_down(terminal)
     Ok(())
 }
