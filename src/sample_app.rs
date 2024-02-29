@@ -5,8 +5,6 @@ use ratatui::{
     widgets::{Block, Borders, List, Paragraph, Widget, Wrap},
 };
 use std::error::Error;
-use std::thread::{self};
-use std::time::Duration;
 #[macro_use]
 extern crate tuiwindow;
 use tuiwindow::hooks::AsyncResource;
