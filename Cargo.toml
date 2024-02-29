@@ -1,6 +1,6 @@
 
 [package]
-name = "vtree"
+name = "tuiwindow"
 version = "0.1.0"
 edition = "2021"
 
@@ -14,7 +14,3 @@ path = "src/sample_app.rs"
 crossterm = "0.27.0"
 ratatui = "0.26.1"
 uuid = { version = "1.7.0", features = ["v4"] }
-macros = { path = "./macros/" }
-futures = "0.3.30"
-tokio = { version = "1.36.0", features = ["full"] }
-async-trait = "0.1.77"

@@ -2,7 +2,9 @@ pub mod core;
 #[macro_use]
 pub mod macros;
 pub mod api;
+pub(crate) mod area_calculation;
 pub mod hooks;
+pub mod render;
 pub mod tui;
 pub(crate) mod utils;
 pub mod window;
@@ -22,7 +24,8 @@ mod tests {
 
     use crate::{
         api::{Page, PageCollection},
-        core::{FocusableRender, Render, RenderComponent, RenderProps},
+        core::RenderComponent,
+        render::{FocusableRender, Render, RenderProps},
         window::Window,
     };
     use crate::{tui::TuiCrossterm, window::DefaultEventMapper};

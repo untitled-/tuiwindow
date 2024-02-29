@@ -1,32 +1,30 @@
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode};
-use ratatui::{
-    buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Rect},
-    text::Text,
-    widgets::Widget,
-};
-use uuid::Uuid;
-
 use crate::{
-    api::{Menu, Page, PageCollection},
+    api::{Menu, Page, PageCollection, RenderId},
     core::{ComponentBuffer, InputEvent, RenderFlow, VRenderProps},
     utils::{CyclicList, SelectableHashMap},
+};
+use crossterm::event::{self, Event, KeyCode, MouseEventKind};
+use ratatui::{
+    buffer::Buffer,
+    layout::{Constraint, Direction, Layout, Position, Rect},
+    text::Text,
+    widgets::Widget,
 };
 
 struct WindowRenderer {}
 
 struct PageContext {
-    id: Uuid,
-    page_id: Uuid,
-    focusable_elements: CyclicList<Uuid>,
+    id: RenderId,
+    page_id: RenderId,
+    focusable_elements: CyclicList<RenderId>,
     event_buffer: ComponentBuffer,
 }
 
 impl PageContext {
     fn new(page: &Page) -> Self {
-        let root_id = Uuid::new_v4();
+        let root_id = RenderId::new();
         Self {
             id: root_id,
             page_id: *page.get_page_id(),
@@ -35,7 +33,7 @@ impl PageContext {
         }
     }
 
-    fn build_focusable_elements(window_id: &Uuid, page: &Page) -> CyclicList<Uuid> {
+    fn build_focusable_elements(window_id: &RenderId, page: &Page) -> CyclicList<RenderId> {
         let mut focusable_elements = vec![*window_id];
         focusable_elements.append(&mut page.get_focusable_elements());
         CyclicList::new(focusable_elements)
@@ -64,7 +62,7 @@ impl PageContext {
         self.focusable_elements.move_previous();
     }
 
-    pub(crate) fn get_focused_element(&self) -> Option<Uuid> {
+    pub(crate) fn get_focused_element(&self) -> Option<RenderId> {
         self.focusable_elements.current().cloned()
     }
 
@@ -146,10 +144,10 @@ impl WindowRenderer {
 }
 
 pub struct Window {
-    id: Uuid,
+    id: RenderId,
     end_condition: Box<dyn Fn(&InputEvent) -> bool>,
     is_ended: bool,
-    page_context_map: SelectableHashMap<Uuid, PageContext>,
+    page_context_map: SelectableHashMap<RenderId, PageContext>,
 }
 
 enum WindowEventResult {
@@ -162,7 +160,7 @@ impl Window {
         app: &PageCollection,
         end_condition: F,
     ) -> Self {
-        let window_id = Uuid::new_v4();
+        let window_id = RenderId::new();
 
         Self {
             id: window_id,
@@ -225,13 +223,14 @@ impl Window {
                     p.focus_prev()
                 }
             }
+            InputEvent::Click(_) => todo!(),
         };
 
         WindowEventResult::None
     }
 
     fn get_active_element_menu(
-        focused_element: &Option<Uuid>,
+        focused_element: &Option<RenderId>,
         current_page: &Page,
     ) -> Option<Menu> {
         if let Some(fe) = focused_element {
@@ -275,11 +274,13 @@ impl Window {
             None
         };
 
+        let current_page_style = app.get_current_page().style;
+        buff.set_style(area, current_page_style);
         let area = WindowRenderer::pre_render(
             self,
             app.get_current_page().shortcut,
             &app.get_menu(),
-            &Self::get_active_element_menu(&focused_element, app.get_current_page()), //TODO: extract menu from focused element
+            &Self::get_active_element_menu(&focused_element, app.get_current_page()),
             buff,
             area,
         );
@@ -315,15 +316,25 @@ pub struct DefaultEventMapper {}
 
 impl EventMapper for DefaultEventMapper {
     fn to_input_event(ev: &crossterm::event::Event) -> Option<InputEvent> {
-        if let Event::Key(key) = ev {
-            return match key.code {
+        match ev {
+            Event::FocusGained => None,
+            Event::FocusLost => None,
+            Event::Key(key) => match key.code {
                 KeyCode::Char(c) => Some(InputEvent::Key(c)),
                 KeyCode::Tab => Some(InputEvent::FocusNext),
                 KeyCode::Esc => Some(InputEvent::FocusWindow),
                 _ => None,
-            };
+            },
+            Event::Mouse(mouse_event) => match mouse_event.kind {
+                MouseEventKind::Up(_) => Some(InputEvent::Click(Position::new(
+                    mouse_event.column,
+                    mouse_event.row,
+                ))),
+                _ => None,
+            },
+            Event::Paste(_) => None,
+            Event::Resize(_, _) => None,
         }
-        None
     }
 }
 
@@ -333,21 +344,6 @@ pub fn get_event<T: EventMapper>() -> Option<InputEvent> {
             if let Ok(ev) = event::read() {
                 return T::to_input_event(&ev);
             }
-            // if let Ok(Event::Key(key)) = event::read() {
-            //     if key.kind == event::KeyEventKind::Press {
-            //         return match key.code {
-            //             KeyCode::Char(c) => Some(InputEvent::Key(c)),
-            //             KeyCode::Tab => Some(InputEvent::FocusNext),
-            //             KeyCode::Esc => Some(InputEvent::FocusWindow),
-            //             _ => None,
-            //         };
-            //     }
-            //     // if let Event::Mouse(mevent) = event {
-            //     //     if let MouseEventKind::Up(_) = mevent.kind {
-            //     //         self.clicked_position = Some(Position::new(mevent.column, mevent.row));
-            //     //     }
-            //     // }
-            // }
         }
     }
     None

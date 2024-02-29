@@ -1,3 +1,11 @@
+use crate::{
+    api::{Menu, RenderId},
+    render::{Render, RenderFactory, RenderProps},
+};
+use ratatui::{
+    buffer::Buffer,
+    layout::{Constraint, Direction, Position, Rect},
+};
 use std::{
     any::Any,
     cell::{RefCell, RefMut},
@@ -5,80 +13,10 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use ratatui::{
-    buffer::Buffer,
-    layout::{Constraint, Direction, Rect},
-};
-use uuid::Uuid;
-
-use crate::api::Menu;
-
 #[derive(PartialEq, Eq)]
 pub enum LayoutDirection {
     Column,
     Row,
-}
-
-pub trait AsAny {
-    fn as_any(&self) -> &dyn Any;
-}
-
-pub trait Render: AsAny {
-    fn render(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect);
-    fn into_component(self) -> RenderComponent
-    where
-        Self: Sized + 'static,
-    {
-        RenderComponent::new(self)
-    }
-
-    fn get_menu(&self) -> Option<Menu> {
-        None
-    }
-}
-
-pub trait FocusableRender: Render {
-    fn render(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect);
-
-    #[allow(unused_variables)]
-    fn render_footer(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect) {}
-
-    fn get_menu(&self) -> Option<Menu> {
-        None
-    }
-}
-
-impl<T: FocusableRender> Render for T {
-    fn render(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect) {
-        FocusableRender::render(self, render_props, buff, area)
-    }
-
-    fn into_component(self) -> RenderComponent
-    where
-        Self: Sized + 'static,
-    {
-        RenderComponent::new_focusable(self)
-    }
-
-    fn get_menu(&self) -> Option<Menu> {
-        FocusableRender::get_menu(self)
-    }
-}
-
-impl<T: Render + 'static> AsAny for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl<T: Render + 'static> From<T> for RenderComponent {
-    fn from(value: T) -> Self {
-        value.into_component()
-    }
-}
-
-pub trait RenderFactory {
-    fn render(&mut self) -> RenderComponent;
 }
 
 /// Wrapper for factory of components.
@@ -151,22 +89,22 @@ pub trait RenderFlow {
         area: Rect,
     );
 
-    fn get_focusable_elements(&self) -> Vec<Uuid>;
+    fn get_focusable_elements(&self) -> Vec<RenderId>;
 
     fn get_menu(&self) -> Option<Menu> {
         None
     }
 }
 
-pub struct RenderComponentDetails {
-    pub id: uuid::Uuid,
+pub struct RenderNode {
+    pub id: RenderId,
     pub focusable: bool,
     pub render: Box<dyn Render>,
 }
 
 pub enum RenderComponent {
-    Layout(uuid::Uuid, LayoutDirection, Vec<RenderComponent>),
-    Render(RenderComponentDetails),
+    Layout(RenderId, LayoutDirection, Vec<RenderComponent>),
+    Render(RenderNode),
     Factory(Box<RenderFactoryBox>),
 }
 
@@ -176,32 +114,26 @@ pub enum InputEvent {
     FocusWindow,
     FocusNext,
     FocusPrevious,
-}
-
-#[derive(Debug)]
-pub struct RenderProps {
-    pub is_focused: bool,
-    pub event: Option<InputEvent>,
-    pub event_buffer: Vec<InputEvent>,
+    Click(Position),
 }
 
 pub struct VRenderProps {
-    pub focused_element: Option<Uuid>,
+    pub focused_element: Option<RenderId>,
     pub event: Option<InputEvent>,
 }
 
 impl RenderComponent {
     pub fn new<T: Render + 'static>(render_fn: T) -> Self {
-        Self::Render(RenderComponentDetails {
-            id: Uuid::new_v4(),
+        Self::Render(RenderNode {
+            id: RenderId::new(),
             focusable: false,
             render: Box::new(render_fn),
         })
     }
 
     pub fn new_focusable<T: Render + 'static>(render_fn: T) -> Self {
-        Self::Render(RenderComponentDetails {
-            id: Uuid::new_v4(),
+        Self::Render(RenderNode {
+            id: RenderId::new(),
             focusable: true,
             render: Box::new(render_fn),
         })
@@ -223,14 +155,14 @@ impl RenderComponent {
     }
 
     pub fn column(children: Vec<RenderComponent>) -> Self {
-        RenderComponent::Layout(uuid::Uuid::new_v4(), LayoutDirection::Column, children)
+        RenderComponent::Layout(RenderId::new(), LayoutDirection::Column, children)
     }
 
     pub fn row(children: Vec<RenderComponent>) -> Self {
-        RenderComponent::Layout(uuid::Uuid::new_v4(), LayoutDirection::Row, children)
+        RenderComponent::Layout(RenderId::new(), LayoutDirection::Row, children)
     }
 
-    pub fn flatten_ids(&self) -> Vec<Uuid> {
+    pub fn flatten_ids(&self) -> Vec<RenderId> {
         match self {
             RenderComponent::Layout(_, _, children) => {
                 children.iter().flat_map(|c| c.flatten_ids()).collect()
@@ -259,7 +191,7 @@ impl RenderComponent {
             RenderComponent::Factory(factory) => factory.component().visit_with_downcast(f),
         };
     }
-    pub fn visit(&self, f: &mut dyn FnMut(&RenderComponentDetails) -> bool) -> bool {
+    pub fn visit(&self, f: &mut dyn FnMut(&RenderNode) -> bool) -> bool {
         match self {
             RenderComponent::Layout(_, _, children) => {
                 for c in children {
@@ -322,7 +254,7 @@ impl RenderFlow for RenderComponent {
         }
     }
 
-    fn get_focusable_elements(&self) -> Vec<Uuid> {
+    fn get_focusable_elements(&self) -> Vec<RenderId> {
         match self {
             RenderComponent::Layout(_, _, children) => {
                 children.iter().flat_map(|c| c.flatten_ids()).collect()
@@ -341,22 +273,22 @@ impl RenderFlow for RenderComponent {
 
 #[derive(Default)]
 pub struct ComponentBuffer {
-    buff: HashMap<Uuid, Vec<InputEvent>>,
+    buff: HashMap<RenderId, Vec<InputEvent>>,
 }
 
 impl ComponentBuffer {
-    pub fn add_event(&mut self, id: Uuid, event: &Option<InputEvent>) {
+    pub fn add_event(&mut self, id: RenderId, event: &Option<InputEvent>) {
         if let Some(ev) = event {
             self.buff.entry(id).or_default().push(ev.clone());
         }
     }
 
-    pub fn get_buffer(&self, id: &Uuid) -> Vec<InputEvent> {
+    pub fn get_buffer(&self, id: &RenderId) -> Vec<InputEvent> {
         self.buff.get(id).unwrap_or(&vec![]).clone()
     }
 }
 
-pub trait LoopManager<'a>: Iterator<Item = (Option<InputEvent>, Option<Uuid>)> {}
+pub trait LoopManager<'a>: Iterator<Item = (Option<InputEvent>, Option<RenderId>)> {}
 
 pub trait Greet {
     fn greet(&self) -> String;
@@ -365,14 +297,11 @@ pub trait Greet {
 #[cfg(test)]
 mod tests {
 
-    extern crate macros;
-
-    use ratatui::buffer::Buffer;
-    use uuid::Uuid;
-
+    use crate::api::RenderId;
     use crate::core::RenderFlow;
     use crate::macros::column_widget;
     use crate::row_widget;
+    use ratatui::buffer::Buffer;
 
     use super::{
         ComponentBuffer, InputEvent, LoopManager, Render, RenderFactory, RenderProps, VRenderProps,
@@ -413,14 +342,14 @@ mod tests {
     }
 
     struct TestLoopManager {
-        focusable_elements: Vec<Option<Uuid>>,
+        focusable_elements: Vec<Option<RenderId>>,
         current_element: usize,
         current_event: usize,
         events: Vec<Option<InputEvent>>,
     }
 
     impl TestLoopManager {
-        fn new(focusable_elements: Vec<Option<Uuid>>, events: Vec<Option<InputEvent>>) -> Self {
+        fn new(focusable_elements: Vec<Option<RenderId>>, events: Vec<Option<InputEvent>>) -> Self {
             Self {
                 focusable_elements,
                 current_element: 0,
@@ -431,7 +360,7 @@ mod tests {
     }
 
     impl Iterator for TestLoopManager {
-        type Item = (Option<InputEvent>, Option<Uuid>);
+        type Item = (Option<InputEvent>, Option<RenderId>);
 
         fn next(&mut self) -> Option<Self::Item> {
             let next = self

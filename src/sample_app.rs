@@ -1,24 +1,24 @@
-use std::error::Error;
-use std::thread::{self};
-use std::time::Duration;
-
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
     widgets::{Block, Borders, List, Paragraph, Widget, Wrap},
 };
+use std::error::Error;
+use std::thread::{self};
+use std::time::Duration;
 #[macro_use]
-extern crate vtree;
-use vtree::hooks::AsyncResource;
-use vtree::{
+extern crate tuiwindow;
+use tuiwindow::hooks::AsyncResource;
+use tuiwindow::{
     api::{Menu, Page, PageCollection},
     core::InputEvent,
     tui::TuiCrossterm,
     window::DefaultEventMapper,
 };
-use vtree::{
-    core::{FocusableRender, Render, RenderComponent, RenderProps},
+use tuiwindow::{
+    core::RenderComponent,
+    render::{FocusableRender, Render, RenderProps},
     window::Window,
 };
 
@@ -139,11 +139,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 AnotherWidget::default(),
                 column_widget!(StaticWidget {}, TestWidget::default())
             ),
-        ),
+        )
+        .with_style(Style::default().bg(Color::White).fg(Color::Black)),
     ]);
 
     let mut window = Window::new(&app, |ev| match ev {
-        vtree::core::InputEvent::Key(c) => *c == 'q',
+        tuiwindow::core::InputEvent::Key(c) => *c == 'q',
         _ => false,
     });
 

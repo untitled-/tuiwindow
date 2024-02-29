@@ -1,6 +1,27 @@
-use uuid::Uuid;
+use ratatui::{
+    layout::{Position, Rect},
+    style::Style,
+};
 
-use crate::core::{RenderComponent, RenderComponentDetails, RenderFlow};
+use crate::{
+    area_calculation::{unroll, UnrolledComponents},
+    core::{RenderComponent, RenderFlow, RenderNode},
+};
+
+#[derive(Debug, Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RenderId(uuid::Uuid);
+
+impl RenderId {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
+impl Default for RenderId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Default, Clone, Debug)]
 pub struct Menu {
@@ -24,15 +45,17 @@ impl Menu {
 }
 
 pub struct Page {
-    id: Uuid,
+    id: RenderId,
     title: String,
     pub(crate) shortcut: char,
     root: RenderComponent,
+    unrolled: UnrolledComponents,
     menu: Menu,
+    pub(crate) style: Style,
 }
 
 impl Page {
-    pub fn get_page_id(&self) -> &Uuid {
+    pub fn get_page_id(&self) -> &RenderId {
         &self.id
     }
 
@@ -41,13 +64,22 @@ impl Page {
         shortcut: char,
         root: T,
     ) -> Self {
+        let root: RenderComponent = root.into();
+        let layout_factories = unroll(&root);
         Self {
-            id: Uuid::new_v4(),
+            id: RenderId::new(),
             shortcut,
             title: title.into(),
-            root: root.into(),
+            root,
             menu: Menu::default(),
+            unrolled: layout_factories,
+            style: Style::default(),
         }
+    }
+
+    pub fn with_style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
     }
 
     pub fn with_menu(&mut self, menu: Menu) -> &mut Self {
@@ -60,8 +92,23 @@ impl Page {
         self
     }
 
-    pub fn visit(&self, f: &mut dyn FnMut(&RenderComponentDetails) -> bool) {
+    pub fn visit(&self, f: &mut dyn FnMut(&RenderNode) -> bool) {
         self.root.visit(f);
+    }
+
+    pub fn components_at_position(&self, pos: &Position, area: &Rect) -> Vec<&RenderId> {
+        self.unrolled
+            .0
+            .iter()
+            .filter_map(|(id, area_calc)| {
+                let sub_area = area_calc(*area);
+                if sub_area.contains(*pos) {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
@@ -80,7 +127,7 @@ impl RenderFlow for Page {
         Some(self.menu.clone())
     }
 
-    fn get_focusable_elements(&self) -> Vec<uuid::Uuid> {
+    fn get_focusable_elements(&self) -> Vec<RenderId> {
         self.root.get_focusable_elements()
     }
 }
@@ -141,7 +188,7 @@ impl RenderFlow for PageCollection {
             .render(opts, component_buffer, buff, area)
     }
 
-    fn get_focusable_elements(&self) -> Vec<uuid::Uuid> {
+    fn get_focusable_elements(&self) -> Vec<RenderId> {
         self.get_current_page().get_focusable_elements()
     }
 
@@ -157,7 +204,7 @@ impl RenderFlow for PageCollection {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::Render;
+    use crate::render::Render;
 
     use super::Page;
 
@@ -166,7 +213,7 @@ mod tests {
     impl Render for MyWidget {
         fn render(
             &mut self,
-            _render_props: &crate::core::RenderProps,
+            _render_props: &crate::render::RenderProps,
             _buff: &mut ratatui::prelude::Buffer,
             _area: ratatui::prelude::Rect,
         ) {
