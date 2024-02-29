@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::thread;
+use std::thread::{self};
 use std::time::Duration;
 
 use ratatui::{
@@ -10,6 +10,7 @@ use ratatui::{
 };
 #[macro_use]
 extern crate vtree;
+use vtree::hooks::AsyncResource;
 use vtree::{
     api::{Menu, Page, PageCollection},
     core::InputEvent,
@@ -20,6 +21,38 @@ use vtree::{
     core::{FocusableRender, Render, RenderComponent, RenderProps},
     window::Window,
 };
+
+#[derive(Default)]
+struct SlowWidget {
+    task: AsyncResource<u64>,
+}
+
+fn fib_cpu_intensive(n: u64) -> u64 {
+    match n {
+        0 => 0,
+        1 => 1,
+        n => fib_cpu_intensive(n - 1) + fib_cpu_intensive(n - 2),
+    }
+}
+
+impl FocusableRender for SlowWidget {
+    fn render(&mut self, render_props: &RenderProps, buff: &mut Buffer, area: Rect) {
+        let maybe_result = self.task.with_thread_spawning(|| fib_cpu_intensive(40));
+
+        let block = Block::new()
+            .borders(Borders::all())
+            .style(if render_props.is_focused {
+                Style::new().fg(Color::Red)
+            } else {
+                Style::new()
+            });
+        Widget::render(
+            Paragraph::new(format!("Very slow: {:?}", maybe_result)).block(block),
+            area,
+            buff,
+        );
+    }
+}
 
 #[derive(Default)]
 struct AnotherWidget {}
@@ -95,7 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "Page 1",
             '1',
             row_widget!(
-                AnotherWidget::default(),
+                SlowWidget::default(),
                 column_widget!(StaticWidget {}, TestWidget::default())
             ),
         ),
@@ -119,8 +152,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             let area = f.size();
             let buff = f.buffer_mut();
 
+            let mut second_buff = buff.clone();
             // draw
-            window.render::<DefaultEventMapper>(&mut app, buff, area)
+            window.render::<DefaultEventMapper>(&mut app, &mut second_buff, area);
+
+            buff.merge(&second_buff);
         })?;
     }
 

@@ -2,6 +2,7 @@ pub mod core;
 #[macro_use]
 pub mod macros;
 pub mod api;
+pub mod hooks;
 pub mod tui;
 pub(crate) mod utils;
 pub mod window;
