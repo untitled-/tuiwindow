@@ -3,8 +3,13 @@
 name = "tuiwindow"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A minimal window and focus manager for Ratatui+Crossterm TUI applications"
+homepage = "https://github.com/untitled-/tuiwindow"
+repository = "https://github.com/untitled-/tuiwindow"
+readme = "README.md"
+license-file = "LICENSE.txt"
+keywords = ["tui", "crossterm", "ratatui", "window", "gui"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "example"
