@@ -1,11 +1,6 @@
 use std::time::Duration;
 
-use crate::{
-    api::{Menu, Page, PageCollection, RenderId},
-    core::{ComponentBuffer, InputEvent, RenderFlow, VRenderProps},
-    utils::{CyclicList, SelectableHashMap},
-};
-use crossterm::event::{self, Event, KeyCode, MouseEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Position, Rect},
@@ -13,71 +8,29 @@ use ratatui::{
     widgets::Widget,
 };
 
+use crate::{
+    core::RenderId,
+    core::{InputEvent, RenderFlow, VRenderProps},
+    utils::SelectableHashMap,
+};
+
+use super::{
+    alerts::AlertManager,
+    menu::{Menu, MenuItem},
+    page::Page,
+    page_collection::PageCollection,
+    page_context::PageContext,
+};
+
 struct WindowRenderer {}
-
-struct PageContext {
-    id: RenderId,
-    page_id: RenderId,
-    focusable_elements: CyclicList<RenderId>,
-    event_buffer: ComponentBuffer,
-}
-
-impl PageContext {
-    fn new(page: &Page) -> Self {
-        let root_id = RenderId::new();
-        Self {
-            id: root_id,
-            page_id: *page.get_page_id(),
-            focusable_elements: Self::build_focusable_elements(&root_id, page),
-            event_buffer: ComponentBuffer::default(),
-        }
-    }
-
-    fn build_focusable_elements(window_id: &RenderId, page: &Page) -> CyclicList<RenderId> {
-        let mut focusable_elements = vec![*window_id];
-        focusable_elements.append(&mut page.get_focusable_elements());
-        CyclicList::new(focusable_elements)
-    }
-
-    pub(crate) fn reconcile(&mut self, page: &Page) {
-        if self.page_id != *page.get_page_id() {
-            self.focusable_elements = Self::build_focusable_elements(&self.id, page);
-            self.event_buffer = ComponentBuffer::default();
-            self.page_id = *page.get_page_id();
-        }
-    }
-
-    pub(crate) fn is_window_focused(&self) -> bool {
-        self.focusable_elements
-            .current()
-            .map(|fid| fid == &self.id)
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn focus_next(&mut self) {
-        self.focusable_elements.move_next();
-    }
-
-    pub(crate) fn focus_prev(&mut self) {
-        self.focusable_elements.move_previous();
-    }
-
-    pub(crate) fn get_focused_element(&self) -> Option<RenderId> {
-        self.focusable_elements.current().cloned()
-    }
-
-    pub(crate) fn reset_focus(&mut self) {
-        self.focusable_elements.reset()
-    }
-}
 
 // TODO: Too ugly, lets improve this. Make it extensible
 impl WindowRenderer {
     pub(crate) fn pre_render(
         window: &mut Window,
         current_page: char,
-        maybe_menu: &Option<Menu>,
-        maybe_focused_menu: &Option<Menu>,
+        maybe_menu: Option<Menu>,
+        maybe_focused_menu: Option<Menu>,
         buff: &mut Buffer,
         area: Rect,
     ) -> Rect {
@@ -101,8 +54,8 @@ impl WindowRenderer {
     fn footer(
         window: &mut Window,
         current_page: char,
-        maybe_menu: &Option<Menu>,
-        maybe_focused_menu: &Option<Menu>,
+        maybe_menu: Option<Menu>,
+        maybe_focused_menu: Option<Menu>,
         area: Rect,
         buff: &mut Buffer,
     ) {
@@ -130,12 +83,18 @@ impl WindowRenderer {
         }
     }
 
-    fn format_menu(maybe_menu: &Option<Menu>, current_page: char) -> Vec<String> {
+    fn format_menu(maybe_menu: Option<Menu>, current_page: char) -> Vec<String> {
         if let Some(menu) = maybe_menu {
             menu.menu_content
                 .iter()
-                .filter(|(k, _)| *k != current_page)
-                .map(|(k, v)| format!("{}) {}", k, v))
+                .filter(|MenuItem { shortcut, .. }| *shortcut != current_page)
+                .map(
+                    |MenuItem {
+                         shortcut,
+                         display_name,
+                         ..
+                     }| format!("{}) {}", shortcut, display_name),
+                )
                 .collect()
         } else {
             vec![]
@@ -148,6 +107,7 @@ pub struct Window {
     end_condition: Box<dyn Fn(&InputEvent) -> bool>,
     is_ended: bool,
     page_context_map: SelectableHashMap<RenderId, PageContext>,
+    alerts: AlertManager,
 }
 
 enum WindowEventResult {
@@ -164,11 +124,8 @@ impl Window {
 
         Self {
             id: window_id,
-            // focusable_elements,
-            // event_buffer,
             end_condition: Box::new(end_condition),
             is_ended: false,
-            // currently_focused: 0,
             page_context_map: SelectableHashMap::new(
                 *app.get_current_page().get_page_id(),
                 app.pages
@@ -176,6 +133,7 @@ impl Window {
                     .map(|page| (*page.get_page_id(), PageContext::new(page)))
                     .collect(),
             ),
+            alerts: AlertManager::default(),
         }
     }
 
@@ -223,7 +181,9 @@ impl Window {
                     p.focus_prev()
                 }
             }
-            InputEvent::Click(_) => todo!(),
+            InputEvent::Click(_) => {
+                // TODO
+            }
         };
 
         WindowEventResult::None
@@ -249,6 +209,12 @@ impl Window {
         }
     }
 
+    fn draw_overlays(&mut self, buf: &mut Buffer, area: Rect) {
+        if let Some(alert) = &mut self.alerts.first_visible() {
+            alert.render(area, buf)
+        }
+    }
+
     pub fn render<T: EventMapper>(
         &mut self,
         app: &mut PageCollection,
@@ -256,13 +222,6 @@ impl Window {
         area: Rect,
     ) {
         let event = get_event::<T>();
-
-        if let Some(ev) = &event {
-            match self.handle_window_event(ev, app) {
-                WindowEventResult::PageChange => self.on_page_change(app),
-                WindowEventResult::None => {}
-            };
-        }
 
         let focused_element = if let Some(page) = self.page_context_map.get_current_mut() {
             let focused_element = page.get_focused_element();
@@ -273,14 +232,24 @@ impl Window {
         } else {
             None
         };
+        if let Some(ev) = &event {
+            match self.handle_window_event(ev, app) {
+                WindowEventResult::PageChange => self.on_page_change(app),
+                WindowEventResult::None => {}
+            };
+
+            if let Some(mut menu) = app.get_menu(&focused_element) {
+                menu.handle_event(&mut self.alerts, ev)
+            }
+        }
 
         let current_page_style = app.get_current_page().style;
         buff.set_style(area, current_page_style);
         let area = WindowRenderer::pre_render(
             self,
             app.get_current_page().shortcut,
-            &app.get_menu(),
-            &Self::get_active_element_menu(&focused_element, app.get_current_page()),
+            app.get_menu(&focused_element),
+            Self::get_active_element_menu(&focused_element, app.get_current_page()),
             buff,
             area,
         );
@@ -292,14 +261,17 @@ impl Window {
             .map(|p| &mut p.event_buffer)
             .unwrap();
         app.render(
-            &VRenderProps {
+            &mut VRenderProps {
+                alerts: &mut self.alerts,
                 focused_element,
                 event,
             },
             event_buffer,
             buff,
             area,
-        )
+        );
+
+        self.draw_overlays(buff, area);
     }
 
     pub fn is_finished(&self) -> bool {
@@ -319,6 +291,11 @@ impl EventMapper for DefaultEventMapper {
         match ev {
             Event::FocusGained => None,
             Event::FocusLost => None,
+            Event::Key(KeyEvent {
+                modifiers: KeyModifiers::SHIFT,
+                code: KeyCode::Tab,
+                ..
+            }) => Some(InputEvent::FocusPrevious),
             Event::Key(key) => match key.code {
                 KeyCode::Char(c) => Some(InputEvent::Key(c)),
                 KeyCode::Tab => Some(InputEvent::FocusNext),

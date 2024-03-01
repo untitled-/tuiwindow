@@ -1,6 +1,6 @@
 use crate::{
-    api::{Menu, RenderId},
     render::{Render, RenderFactory, RenderProps},
+    windows::{alerts::*, menu::Menu},
 };
 use ratatui::{
     buffer::Buffer,
@@ -12,6 +12,21 @@ use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
 };
+
+#[derive(Debug, Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RenderId(uuid::Uuid);
+
+impl RenderId {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
+impl Default for RenderId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(PartialEq, Eq)]
 pub enum LayoutDirection {
@@ -83,7 +98,7 @@ impl RenderFactoryBox {
 pub trait RenderFlow {
     fn render(
         &mut self,
-        opts: &VRenderProps,
+        opts: &mut VRenderProps,
         component_buffer: &mut ComponentBuffer,
         buff: &mut Buffer,
         area: Rect,
@@ -91,7 +106,7 @@ pub trait RenderFlow {
 
     fn get_focusable_elements(&self) -> Vec<RenderId>;
 
-    fn get_menu(&self) -> Option<Menu> {
+    fn get_menu(&self) -> Option<&Menu> {
         None
     }
 }
@@ -117,9 +132,10 @@ pub enum InputEvent {
     Click(Position),
 }
 
-pub struct VRenderProps {
+pub struct VRenderProps<'a> {
     pub focused_element: Option<RenderId>,
     pub event: Option<InputEvent>,
+    pub alerts: &'a mut AlertManager,
 }
 
 impl RenderComponent {
@@ -210,7 +226,7 @@ impl RenderComponent {
 impl RenderFlow for RenderComponent {
     fn render(
         &mut self,
-        opts: &VRenderProps,
+        opts: &mut VRenderProps,
         component_buffer: &mut ComponentBuffer,
         buff: &mut Buffer,
         area: Rect,
@@ -238,6 +254,7 @@ impl RenderFlow for RenderComponent {
                 details.render.render(
                     &RenderProps {
                         is_focused,
+                        alerts: opts.alerts,
                         event: if is_focused { opts.event.clone() } else { None },
                         event_buffer: component_buffer.get_buffer(&details.id),
                     },
@@ -297,10 +314,11 @@ pub trait Greet {
 #[cfg(test)]
 mod tests {
 
-    use crate::api::RenderId;
     use crate::core::RenderFlow;
+    use crate::core::RenderId;
     use crate::macros::column_widget;
     use crate::row_widget;
+    use crate::windows::alerts::AlertManager;
     use ratatui::buffer::Buffer;
 
     use super::{
@@ -478,9 +496,10 @@ mod tests {
             );
             event_buffer.add_event(focused_element.unwrap(), &event);
             app.render(
-                &VRenderProps {
+                &mut VRenderProps {
                     focused_element,
                     event,
+                    alerts: &mut AlertManager::default(),
                 },
                 &mut event_buffer,
                 &mut buffer,

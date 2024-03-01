@@ -7,7 +7,7 @@ pub mod hooks;
 pub mod render;
 pub mod tui;
 pub(crate) mod utils;
-pub mod window;
+pub mod windows;
 
 #[cfg(test)]
 mod tests {
@@ -23,12 +23,15 @@ mod tests {
     };
 
     use crate::{
-        api::{Page, PageCollection},
         core::RenderComponent,
         render::{FocusableRender, Render, RenderProps},
-        window::Window,
+        tui::TuiCrossterm,
+        windows::{
+            page::Page,
+            page_collection::PageCollection,
+            window::{DefaultEventMapper, Window},
+        },
     };
-    use crate::{tui::TuiCrossterm, window::DefaultEventMapper};
 
     struct TestWidget {}
 

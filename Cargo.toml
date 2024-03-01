@@ -1,3 +1,4 @@
+workspace = { members = ["tuiwindow-macros"] }
 
 [package]
 name = "tuiwindow"
@@ -19,3 +20,4 @@ path = "src/sample_app.rs"
 crossterm = "0.27.0"
 ratatui = "0.26.1"
 uuid = { version = "1.7.0", features = ["v4"] }
+tuiwindow-macros = {path = "./tuiwindow-macros/"}

@@ -4,21 +4,23 @@ use ratatui::{
     style::{Color, Style},
     widgets::{Block, Borders, List, Paragraph, Widget, Wrap},
 };
-use std::error::Error;
+use std::{error::Error, time::Duration};
+use tuiwindow::core::RenderComponent;
+use tuiwindow::{
+    core::InputEvent,
+    hooks::AsyncResource,
+    render::{FocusableRender, Render, RenderProps},
+    tui::TuiCrossterm,
+    windows::{
+        alerts::Alert,
+        menu::{Menu, MenuEvent},
+        page::Page,
+        page_collection::PageCollection,
+        window::{DefaultEventMapper, Window},
+    },
+};
 #[macro_use]
 extern crate tuiwindow;
-use tuiwindow::hooks::AsyncResource;
-use tuiwindow::{
-    api::{Menu, Page, PageCollection},
-    core::InputEvent,
-    tui::TuiCrossterm,
-    window::DefaultEventMapper,
-};
-use tuiwindow::{
-    core::RenderComponent,
-    render::{FocusableRender, Render, RenderProps},
-    window::Window,
-};
 
 #[derive(Default)]
 struct SlowWidget {
@@ -72,7 +74,17 @@ impl FocusableRender for AnotherWidget {
     }
 
     fn get_menu(&self) -> Option<Menu> {
-        Some(Menu::from_entries(vec![('/', "Search")]))
+        Some(Menu::from_entries(vec![(
+            '/',
+            "Search",
+            |ev: MenuEvent| {
+                ev.alerts.schedule(Alert::new(
+                    "Search",
+                    "Search something?",
+                    Duration::from_secs(2),
+                ))
+            },
+        )]))
     }
 }
 

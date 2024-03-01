@@ -3,8 +3,8 @@ use std::any::Any;
 use ratatui::{buffer::Buffer, layout::Rect};
 
 use crate::{
-    api::Menu,
     core::{InputEvent, RenderComponent},
+    windows::{alerts::AlertManager, menu::Menu},
 };
 
 pub trait AsAny {
@@ -70,8 +70,13 @@ pub trait RenderFactory {
 }
 
 #[derive(Debug)]
-pub struct RenderProps {
+pub struct RenderProps<'a> {
     pub is_focused: bool,
     pub event: Option<InputEvent>,
     pub event_buffer: Vec<InputEvent>,
+    pub alerts: &'a AlertManager,
+}
+
+pub trait RenderTimed {
+    fn is_visible(&self) -> bool;
 }
