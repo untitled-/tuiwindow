@@ -2,7 +2,7 @@ workspace = { members = ["tuiwindow-macros"] }
 
 [package]
 name = "tuiwindow"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A minimal window and focus manager for Ratatui+Crossterm TUI applications"
 homepage = "https://github.com/untitled-/tuiwindow"
@@ -20,4 +20,4 @@ path = "src/sample_app.rs"
 crossterm = "0.27.0"
 ratatui = "0.26.1"
 uuid = { version = "1.7.0", features = ["v4"] }
-tuiwindow-macros = {path = "./tuiwindow-macros/"}
+tuiwindow-macros = { path = "./tuiwindow-macros/" }
